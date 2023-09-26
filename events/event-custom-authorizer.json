@@ -1,0 +1,34 @@
+{
+    "type": "REQUEST",
+    "methodArn": "arn:aws:execute-api:us-east-1:111122223333:zzzzab09z1/ESTestInvoke-stage/GET/",
+    "resource": "/",
+    "path": "/",
+    "httpMethod": "GET",
+    "headers": {
+        "x-origin-verify": "validsecretvalue"
+    },
+    "multiValueHeaders": {
+        "x-origin-verify": [
+            "validsecretvalue"
+        ]
+    },
+    "queryStringParameters": {},
+    "multiValueQueryStringParameters": {},
+    "pathParameters": {},
+    "stageVariables": {},
+    "requestContext": {
+        "resourceId": "test-invoke-resource-id",
+        "resourcePath": "/",
+        "httpMethod": "GET",
+        "extendedRequestId": "GRTpAEdgoAMFVhQ=",
+        "requestTime": "09/Jun/2023:21:28:12 +0000",
+        "path": "/",
+        "protocol": "HTTP/1.1",
+        "stage": "test-invoke-stage",
+        "domainPrefix": "testPrefix",
+        "requestTimeEpoch": 1686346092560,
+        "requestId": "a40aa2d8-3976-426b-9feb-181f1e288713",
+        "domainName": "testPrefix.testDomainName",
+        "apiId": "zzzzab09z1"
+    }
+}

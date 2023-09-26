@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="Contact Us" />
+        <title>Contact Us</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT" crossorigin="anonymous">
+        <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-u1OknCvxWvY5kfmNBILK2hRnQC3Pr17a+RTT6rIHI7NnikvbZlHgTPOOmMi466C8" crossorigin="anonymous"></script>
+        <script type="text/javascript" src="https://code.jquery.com/jquery-3.7.0.min.js" integrity="sha256-2Pmvv0kuTBOenSvLm6bvfBSSHrUJ+3A7x6P5Ebd07/g=" crossorigin="anonymous"></script>
+        <!-- INSERT AWS WAF JAVASCRIPT TAG CODE BELOW -->
+    </head>
+    <body>
+        <div id="captcha-container"></div>
+        <div id="form-container" class="col-lg-8 mx-auto p-4 py-md-5">
+            <h1 class="h1-responsive font-weight-bold text-center my-4 border-bottom">Contact Us</h1>
+            <!-- Success Alert -->
+            <div id="success-container" class="alert alert-success alert-dismissible fade show" style="display:none">
+                <strong>Success!</strong> Your message has been sent successfully.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <!-- Error Alert -->
+            <div id="error-container" class="alert alert-danger alert-dismissible fade show" style="display:none">
+                <strong>Error!</strong> A problem has occurred while submitting your data. Please try again.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <main>
+                <fieldset id="form-fieldset">
+                    <form id="contact-form" class="needs-validation" novalidate method="post" autocomplete="off">
+                        <div>
+                            <label for="input-name" class="form-label">Name</label>
+                            <input type="text" pattern="[A-Za-z ]{1,32}" class="form-control" id="input-name" required minlength="2">
+                            <div class="invalid-feedback">
+                            Please provide Name.
+                            </div>
+                        </div>
+                        <div>
+                            <label for="input-phone" class="form-label">Phone</label>
+                            <input type="phone" pattern="[0-9]{10}" class="form-control" id="input-phone" required minlength="10">
+                            <div class="invalid-feedback">
+                            Please provide Phone Number.
+                            </div>
+                        </div>
+                        <div>
+                            <label for="input-email" class="form-label">Email</label>
+                            <input type="email" pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" class="form-control" id="input-email" required minlength="6">
+                            <div class="invalid-feedback">
+                            Please provide Email Address.
+                            </div>
+                        </div>
+                        <div>
+                            <label for="input-description" class="form-label">Description</label>
+                            <input type="text" pattern="[A-Za-z0-9 ]{5,255}" class="form-control" id="input-description" required minlength="5"></input>    
+                            <div class="invalid-feedback">
+                            Please provide Description.
+                            </div>
+                        </div>
+                        <br>
+                        <button class="btn btn-primary" type="submit" onClick="submitForm(event)" id="submitButton" disabled>Submit</button>
+                    </form>
+                </fieldset>
+            </main>
+        </div>
+        <script>
+            $(document).ready(function () {
+                //render the captcha
+                const container = $("#captcha-container")[0];
+                AwsWafCaptcha.renderCaptcha(container, {
+                    apiKey: "REPLACE WITH CAPTCHA INTEGRATION API KEY HERE",
+                    onSuccess: () => {
+                        $("#submitButton").removeAttr('disabled');
+                    },
+                    onError: () => {
+                        console.log("Error validating captcha");
+                        $('#error-container').show();
+                    }
+                });
+
+                //validate the form inline
+                var forms = document.querySelectorAll('.needs-validation')
+                Array.prototype.slice.call(forms).forEach(function (form) {
+                    form.addEventListener('keyup', function (event) {
+                        if (!form.checkValidity()) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            $("#submitButton").attr('disabled', true);
+                        } else {
+                            $("#submitButton").removeAttr('disabled');
+                        }
+                        form.classList.add('was-validated');
+                    }, false)
+                })
+
+            });
+
+            //submit the contact us data if the form has been validated
+            function submitForm(event){
+                event.preventDefault();
+                event.stopPropagation()
+                if (document.querySelectorAll('.was-validated').length > 0) {
+                    var data = {
+                        name: $("#input-name").val(),
+                        phone: $("#input-phone").val(),
+                        email: $("#input-email").val(),
+                        description: $("#input-description").val()
+                    };
+                    AwsWafIntegration.fetch("./v1/contactus", {
+                        method: "POST",
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    })
+                    .then(response => {
+                        console.log(response.status);
+                        if (response.ok) {
+                            $("#form-fieldset").prop("disabled", true);
+                            $('#success-container').show();
+                        } else {
+                            console.log("HTTP status " + response.status);
+                            $('#error-container').show();                            
+                        }
+                    })
+                    .catch(error => {
+                        console.log("Error occurred:" + error);
+                        $('#error-container').show();
+                    })
+                }
+            }
+        </script>
+    </body>
+</html>

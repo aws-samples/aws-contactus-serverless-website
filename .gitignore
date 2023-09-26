@@ -1,0 +1,9 @@
+# local files
+.aws-sam
+node_modules
+samconfig.toml
+target
+
+# system files
+.DS_Store
+**/.DS_Store

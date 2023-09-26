@@ -1,0 +1,495 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Contact Us Serverless Website with static content hosted on S3 and the backend deployed on API Gateway and AWS Lambda and served through CloudFront and protected through WAF.
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Provide S3 Bucket Name for the Contact Us Website.
+  SESRegion:
+    Type: String
+    Default: us-east-1
+    Description: Region you have configured SES in (Default us-east-1).
+  SESSendFrom:
+    Type: String
+    Description: Email thats authorized in this account for SES sending. Will not email if blank.
+  SESSendTo:
+    Type: String
+    Description: List of comma seperated emails to send to.
+
+Resources:
+
+  ##########################################################################
+  # Contact Us Website Bucket                                    
+  ##########################################################################
+  ContactUsBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy:  Delete
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref S3BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "S3 Bucket should have access logging configured -> Bucket for static site and access restricted through OAI, enable logging based on logging requirements."
+
+  ##########################################################################
+  # Contact Us Website Bucket Policy                                    
+  ##########################################################################
+  ContactUsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContactUsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: "cloudfront.amazonaws.com"
+            Action:
+              - "s3:GetObject"
+            Resource:
+              - Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ContactUsBucket
+                  - "/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn":
+                  Fn::Join:
+                    - ""
+                    - - "arn:aws:cloudfront::"
+                      - !Ref AWS::AccountId
+                      - ":distribution/"
+                      - !Ref ContactUsCloudFrontDistribution
+          - Sid: AllowSSLRequestsOnly
+            Action: s3:*
+            Effect: Deny
+            Resource:
+              - Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ContactUsBucket
+              - Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ContactUsBucket
+                  - "/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+            Principal:
+              AWS: "*"
+          - Sid: EnforceTLSv12orHigher
+            Action: s3:*
+            Effect: Deny
+            Resource:
+              - Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ContactUsBucket
+              - Fn::Join:
+                - ""
+                - - "arn:aws:s3:::"
+                  - Ref: ContactUsBucket
+                  - "/*"
+            Condition:
+              NumericLessThan:
+                s3:TlsVersion: 1.2
+            Principal:
+              AWS: "*"
+  ##########################################################################
+  # Contact Us Lambda Function 
+  ##########################################################################
+  ContactUsLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/put-contact-us.putContactUsHandler
+      Runtime: nodejs18.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 120
+      Description: Lambda to process contact us form data.
+      Tracing: Active
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+          - Sid: SendSESEmail
+            Effect: Allow
+            Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+            Resource:
+              - !Sub "arn:aws:ses:${SESRegion}:${AWS::AccountId}:configuration-set/*"
+              - !Sub "arn:aws:ses:${SESRegion}:${AWS::AccountId}:identity/*"
+      Environment:
+        Variables:
+          SES_REGION: !Ref SESRegion
+          SES_SEND_FROM: !Ref SESSendFrom
+          SES_SEND_TO: !Ref SESSendTo
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ContactUsApi
+            Path: /v1/contactus
+            Method: POST
+            RequestParameters:
+              - method.request.header.x-origin-verify:
+                  Required: true
+                  Caching: false
+            RequestModel:
+              Model: ContactUs
+              Required: true
+              ValidateBody: true
+              ValidateParameters: true
+            Auth:
+              ApiKeyRequired: true
+              Authorizer: LambdaRequestAuthorizer
+      ReservedConcurrentExecutions: 10
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Lambda functions should be deployed inside a VPC -> Deploy the Lambda to VPC based on security and networking requirements."
+          - id: W68
+            reason: "AWS::ApiGateway::Deployment resources should be associated with an AWS::ApiGateway::UsagePlan. -> False positive due to serverless transform: https://github.com/stelligent/cfn_nag/issues/524, https://github.com/stelligent/cfn_nag/issues/522."
+          - id: W69
+            reason: "AWS::ApiGateway::Stage should have the AccessLogSetting property defined. -> False positive due to serverless transform: https://github.com/stelligent/cfn_nag/issues/524, https://github.com/stelligent/cfn_nag/issues/522."
+          - id: W64
+            reason: "AWS::ApiGateway::Stage resources should be associated with an AWS::ApiGateway::UsagePlan. -> False positive due to serverless transform: https://github.com/stelligent/cfn_nag/issues/524, https://github.com/stelligent/cfn_nag/issues/522."
+
+  ##########################################################################
+  # Contact Us Custom Request Authorizer Lambda Function 
+  ##########################################################################
+  ContactUsCustomRequestAuthorizerLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/custom-request-authorizer.customRequestAuthorizerHandler
+      Runtime: nodejs18.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 120
+      Description: Custom Authorizer for API Gateway to validate x-origin-verify
+      Tracing: Active
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+          - Sid: AllowSecretsManagerAccess
+            Effect: Allow
+            Action:
+              - "secretsmanager:GetSecretValue"
+              - "kms:Decrypt*"
+            Resource:
+              - !Ref ContactUsXOriginVerifyHeaderSecret
+              - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:key/*"
+      Environment:
+        Variables:
+          X_ORIGIN_VERIFY_SECRET_ARN: !Ref ContactUsXOriginVerifyHeaderSecret
+          STACK_REGION: !Ref AWS::Region
+      ReservedConcurrentExecutions: 10
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Lambda functions should be deployed inside a VPC -> Deploy the Lambda to VPC based on security and networking requirements."
+  ##########################################################################
+  # Contact Us REST API                                                    
+  ##########################################################################
+  ContactUsApi:
+    DependsOn: ContactUsLambda
+    Type: AWS::Serverless::Api
+    Properties:
+      EndpointConfiguration:
+        Type: REGIONAL
+      StageName: prod
+      TracingEnabled: true
+      Models: 
+        ContactUs: 
+          $schema: "https://json-schema.org/draft/2020-12/schema"
+          properties: 
+            name: 
+              type: string
+            phone: 
+              type: string
+            email: 
+              type: string
+            description: 
+              type: string
+          required: 
+            - name
+            - phone
+            - email
+            - description
+          title: ContactUsModel
+          type: object
+      Auth:
+        ApiKeyRequired: true
+        Authorizers:
+          LambdaRequestAuthorizer:
+            FunctionArn: !GetAtt ContactUsCustomRequestAuthorizerLambda.Arn
+            FunctionPayloadType: REQUEST
+            Identity:
+              Headers:
+                - "x-origin-verify"
+      Cors:
+        AllowMethods: "'POST'"
+        AllowHeaders: "'X-Forwarded-For,Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Origin-Verify'"
+        MaxAge: "'600'"
+
+  ##########################################################################
+  # Contact Us REST API Usage Plan                                           
+  ##########################################################################
+  ContactUsApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref ContactUsApi
+          Stage: !Ref ContactUsApi.Stage
+      Description: Contact Us API Usage Plan
+      Quota:
+        Limit: 500
+        Period: MONTH
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 50
+      UsagePlanName: ContactUsApiUsagePlan
+
+  ##########################################################################
+  # Contact Us REST API Key                                              
+  ##########################################################################
+  ContactUsApiAccessKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: ContactUsApiUsagePlan
+    Properties:
+      Description: API Key for the Contact Us API.
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref ContactUsApi
+          StageName: !Ref ContactUsApi.Stage
+
+  ##########################################################################
+  # Link Contact Us API Key to Usage Plan                                           
+  ##########################################################################
+  ContactUsPlanApiKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ContactUsApiAccessKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ContactUsApiUsagePlan
+
+  ##########################################################################
+  # CloudFront Origin Access Control
+  ##########################################################################
+  ContactUsCloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl      
+    Properties:
+      OriginAccessControlConfig: 
+        Description: ContactUs Website Origin Access Control
+        Name: !GetAtt ContactUsBucket.DomainName
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ##########################################################################
+  # Contact Us Custom X Origin Verify Header Secret
+  ##########################################################################
+  ContactUsXOriginVerifyHeaderSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: ContactUsXOriginVerifyHeaderSecret
+      Description: Contact Us Cross Origin Verify Header for API Gateway
+      KmsKeyId: alias/aws/secretsmanager
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '@/\}._":|;,-?()!<>\{\}`~[]\+=%$*&~^'
+        ExcludePunctuation: true
+
+  ##########################################################################
+  # Contact Us Website CloudFront Distribution
+  ##########################################################################
+  ContactUsCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+          ForwardedValues:
+            QueryString: true
+          TargetOriginId: website
+          ViewerProtocolPolicy: redirect-to-https
+        CacheBehaviors: 
+          - AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            PathPattern: "/v1/*"
+            TargetOriginId: api 
+            ViewerProtocolPolicy: https-only
+        DefaultRootObject: index.html
+        Enabled: true
+        Origins:
+          - DomainName: !GetAtt ContactUsBucket.DomainName
+            Id: website
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !Ref ContactUsCloudFrontOriginAccessControl
+          - DomainName:
+              Fn::Join:
+                - ""
+                - - Ref: ContactUsApi
+                  - ".execute-api."
+                  - Ref: AWS::Region
+                  - ".amazonaws.com"
+            Id: api
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+            OriginCustomHeaders:
+              - HeaderName: x-api-key
+                HeaderValue: "UPDATEME_WITH_API_KEY"
+              - HeaderName: x-origin-verify
+                HeaderValue: "UPDATEME_WITH_VALUE_FROM_SECRETS_MANAGER_SECRET_NAME_ContactUsXOriginVerifyHeaderSecret"
+            OriginPath: /prod 
+        Restrictions:
+          GeoRestriction:
+            RestrictionType:  whitelist
+            Locations:
+              - US
+              - CA
+        PriceClass: PriceClass_100
+        WebACLId: !GetAtt ContactUsWAFWebACL.Arn
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W10
+            reason: "CloudFront Distribution should enable access logging -> Disabled for the current deployment but can be enabled based on logging requirements."
+          - id: W70
+            reason: "Cloudfront should use minimum protocol version TLS 1.2. -> CloudFront automatically sets the security policy to TLSv1."
+
+  ##########################################################################
+  # Contact Us Website WAF
+  ##########################################################################
+  ContactUsWAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: ContactUsWAFWebACL
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: MetricForContactUsWAFWebACL
+      Rules:
+        - Name: Custom-Rate-Base-Rule-To-Restrict-Source-IP-Aggregation-To-100
+          Priority: 10
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForRequestsByIP
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              AggregateKeyType: IP
+        - Name: ContactUs-API-Captcha
+          Priority: 20
+          Statement:
+            AndStatement:
+                Statements:
+                    - 
+                      ByteMatchStatement:
+                        SearchString: /v1/contactus
+                        FieldToMatch:
+                          UriPath: {}
+                        TextTransformations:
+                          - 
+                            Priority: 0
+                            Type: NONE
+                        PositionalConstraint: CONTAINS
+                    - 
+                      GeoMatchStatement:
+                        CountryCodes:
+                          - US
+                          - CA
+          Action:
+            Captcha: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForContactUsApiCaptcha
+          CaptchaConfig:
+              ImmunityTimeProperty:
+                  ImmunityTime: 60
+        - Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 30
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForAMRCRS
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+        - Name: AWS-AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 40
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForAMRBIS
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+
+Outputs:
+  CloudFrontDistributionEndpoint:
+    Description: "Contact Us Website CloudFront Distribution Domain"
+    Value: !GetAtt ContactUsCloudFrontDistribution.DomainName

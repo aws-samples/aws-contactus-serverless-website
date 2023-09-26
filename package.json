@@ -1,0 +1,33 @@
+{
+    "name": "aws-contactus-serverless-website",
+    "description": "aws-contactus-serverless-website",
+    "version": "1.0.0",
+    "private": true,
+    "dependencies": {
+        "@aws-sdk/client-secrets-manager": "^3.188.0",
+        "@aws-sdk/client-ses": "^3.188.0",
+        "@aws-sdk/client-sts": "^3.188.0"
+    },
+    "devDependencies": {
+        "aws-sdk-client-mock": "^2.0.0",
+        "jest": "^29.2.1"
+    },
+    "scripts": {
+        "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
+    },
+    "jest": {
+        "testMatch": [
+            "**/__tests__/**/*.[jt]s?(x)",
+            "**/?(*.)+(spec|test).[jt]s?(x)",
+            "**/__tests__/**/*.mjs?(x)",
+            "**/?(*.)+(spec|test).mjs?(x)"
+        ],
+        "moduleFileExtensions": [
+            "mjs",
+            "js"
+        ]
+    },
+    "overrides": {
+        "semver": "^7.5.3"
+    }
+}
