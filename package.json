@@ -4,9 +4,9 @@
     "version": "1.0.0",
     "private": true,
     "dependencies": {
-        "@aws-sdk/client-secrets-manager": "^3.188.0",
-        "@aws-sdk/client-ses": "^3.188.0",
-        "@aws-sdk/client-sts": "^3.188.0"
+        "@aws-sdk/client-secrets-manager": "^3.624.0",
+        "@aws-sdk/client-ses": "^3.624.0",
+        "@aws-sdk/client-sts": "^3.624.0"
     },
     "devDependencies": {
         "aws-sdk-client-mock": "^2.0.0",
