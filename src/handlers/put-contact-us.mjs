@@ -12,7 +12,7 @@ export const putContactUsHandler = async (event) => {
     }
 
     //log the payload
-    console.log('received:', event.body);
+    console.log('received:', JSON.stringify(event.body));
 
     //parse the payload
     const payload = JSON.parse(event.body);
@@ -43,11 +43,11 @@ export const putContactUsHandler = async (event) => {
     //send the email
     try {
         let ses_response = await ses.send(command);
-        console.info(`SES response for: ${event.httpMethod} is: ${ses_response.statusCode} `);
+        console.info(`SES response for: ${JSON.stringify(event.httpMethod)} is: ${JSON.stringify(ses_response.statusCode)} `);
         return generateResponse(200, "Success")
     }
     catch (error) {
-        console.info(`error: ${error}`);
+        console.info(`error: ${JSON.stringify(error)}`);
         return generateResponse(500, "Failure")
     }
 
